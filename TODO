@@ -1,0 +1,4 @@
+- maybe cookie auth (not basic auth only)
+- jar and other cfg.* options support
+- tests
+- cors supoort options and short manual

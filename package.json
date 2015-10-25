@@ -1,0 +1,35 @@
+{
+  "name": "browser-nano",
+  "version": "0.0.1",
+  "dependencies": {
+    "nano": "6.1.4",
+    "browser-request": "0.2.1",
+    "errs": "0.3.0",
+    "underscore": "1.7.0",
+    "debug": "2.0.0",
+    "follow": "0.12.1"
+  },
+  "devDependencies": {
+    "browserify-swap": "^0.2.2",
+    "express": "^4.13.3",
+    "minifyify": "^7.1.0"
+  },
+  "browserify": {
+    "transform": [
+      "browserify-swap"
+    ]
+  },
+  "browserify-swap": {
+    "@packages": ["underscore"],
+    "dev": {
+      ".*node_modules.*underscore.js": "./stub/underscore.js"
+    }
+  },
+  "scripts": {
+    "build": "npm run build:full && npm run build:full-min && npm run build:light && npm run build:light-min",
+    "build:full": "BROWSERIFYSWAP_ENV='dev' browserify -i request ./lib/index.js > ./dist/browser-nano.full.js",
+    "build:full-min": "BROWSERIFYSWAP_ENV='dev' browserify -i request -p [minifyify --no-map] ./lib/index.js  > ./dist/browser-nano.full.min.js",
+    "build:light": "BROWSERIFYSWAP_ENV='dev' browserify -i request -i follow ./lib/index.js > ./dist/browser-nano.light.js",
+    "build:light-min": "BROWSERIFYSWAP_ENV='dev' browserify -i request -i follow -p [minifyify --no-map] ./lib/index.js > ./dist/browser-nano.light.min.js"
+  }
+}
