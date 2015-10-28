@@ -31,7 +31,7 @@ module.exports = self.nano = function (cfg) {
     return nano(cfg);
 };
 
-},{"browser-request":2,"nano":50,"url":35}],2:[function(require,module,exports){
+},{"browser-request":2,"nano":49,"url":34}],2:[function(require,module,exports){
 // Browser Request
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -46,19 +46,28 @@ module.exports = self.nano = function (cfg) {
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-var xmlhttprequest = require('./xmlhttprequest')
-if(!xmlhttprequest || typeof xmlhttprequest !== 'object')
-  throw new Error('Could not find ./xmlhttprequest')
+// UMD HEADER START 
+(function (root, factory) {
+    if (typeof define === 'function' && define.amd) {
+        // AMD. Register as an anonymous module.
+        define([], factory);
+    } else if (typeof exports === 'object') {
+        // Node. Does not work with strict CommonJS, but
+        // only CommonJS-like enviroments that support module.exports,
+        // like Node.
+        module.exports = factory();
+    } else {
+        // Browser globals (root is window)
+        root.returnExports = factory();
+  }
+}(this, function () {
+// UMD HEADER END
 
-var XHR = xmlhttprequest.XMLHttpRequest
-if(!XHR)
-  throw new Error('Bad xmlhttprequest.XMLHttpRequest')
-if(! ('_object' in (new XHR)))
-  throw new Error('This is not portable XMLHttpRequest')
-
-module.exports = request
-request.XMLHttpRequest = XHR
-request.log = getLogger()
+var XHR = XMLHttpRequest
+if (!XHR) throw new Error('missing XMLHttpRequest')
+request.log = {
+  'trace': noop, 'debug': noop, 'info': noop, 'warn': noop, 'error': noop
+}
 
 var DEFAULT_TIMEOUT = 3 * 60 * 1000 // 3 minutes
 
@@ -82,6 +91,8 @@ function request(options, callback) {
     options = JSON.parse(JSON.stringify(options)); // Use a duplicate for mutating.
 
   options.onResponse = options_onResponse // And put it back.
+
+  if (options.verbose) request.log = getLogger();
 
   if(options.url) {
     options.uri = options.url;
@@ -118,6 +129,70 @@ function request(options, callback) {
     else if(typeof options.body !== 'string')
       options.body = JSON.stringify(options.body)
   }
+  
+  //BEGIN QS Hack
+  var serialize = function(obj) {
+    var str = [];
+    for(var p in obj)
+      if (obj.hasOwnProperty(p)) {
+        str.push(encodeURIComponent(p) + "=" + encodeURIComponent(obj[p]));
+      }
+    return str.join("&");
+  }
+  
+  if(options.qs){
+    var qs = (typeof options.qs == 'string')? options.qs : serialize(options.qs);
+    if(options.uri.indexOf('?') !== -1){ //no get params
+        options.uri = options.uri+'&'+qs;
+    }else{ //existing get params
+        options.uri = options.uri+'?'+qs;
+    }
+  }
+  //END QS Hack
+  
+  //BEGIN FORM Hack
+  var multipart = function(obj) {
+    //todo: support file type (useful?)
+    var result = {};
+    result.boundry = '-------------------------------'+Math.floor(Math.random()*1000000000);
+    var lines = [];
+    for(var p in obj){
+        if (obj.hasOwnProperty(p)) {
+            lines.push(
+                '--'+result.boundry+"\n"+
+                'Content-Disposition: form-data; name="'+p+'"'+"\n"+
+                "\n"+
+                obj[p]+"\n"
+            );
+        }
+    }
+    lines.push( '--'+result.boundry+'--' );
+    result.body = lines.join('');
+    result.length = result.body.length;
+    result.type = 'multipart/form-data; boundary='+result.boundry;
+    return result;
+  }
+  
+  if(options.form){
+    if(typeof options.form == 'string') throw('form name unsupported');
+    if(options.method === 'POST'){
+        var encoding = (options.encoding || 'application/x-www-form-urlencoded').toLowerCase();
+        options.headers['content-type'] = encoding;
+        switch(encoding){
+            case 'application/x-www-form-urlencoded':
+                options.body = serialize(options.form).replace(/%20/g, "+");
+                break;
+            case 'multipart/form-data':
+                var multi = multipart(options.form);
+                //options.headers['content-length'] = multi.length;
+                options.body = multi.body;
+                options.headers['content-type'] = multi.type;
+                break;
+            default : throw new Error('unsupported encoding:'+encoding);
+        }
+    }
+  }
+  //END FORM Hack
 
   // If onResponse is boolean true, call back immediately when the response is known,
   // not when the full request is complete.
@@ -143,7 +218,7 @@ function run_xhr(options) {
   var xhr = new XHR
     , timed_out = false
     , is_cors = is_crossDomain(options.uri)
-    , supports_cors = ('withCredentials' in xhr._object)
+    , supports_cors = ('withCredentials' in xhr)
 
   req_seq += 1
   xhr.seq_id = req_seq
@@ -173,7 +248,7 @@ function run_xhr(options) {
   xhr.onreadystatechange = on_state_change
   xhr.open(options.method, options.uri, true) // asynchronous
   if(is_cors)
-    xhr._object.withCredentials = !! options.withCredentials
+    xhr.withCredentials = !! options.withCredentials
   xhr.send(options.body)
   return xhr
 
@@ -257,6 +332,33 @@ function run_xhr(options) {
 
 request.withCredentials = false;
 request.DEFAULT_TIMEOUT = DEFAULT_TIMEOUT;
+
+//
+// defaults
+//
+
+request.defaults = function(options, requester) {
+  var def = function (method) {
+    var d = function (params, callback) {
+      if(typeof params === 'string')
+        params = {'uri': params};
+      else {
+        params = JSON.parse(JSON.stringify(params));
+      }
+      for (var i in options) {
+        if (params[i] === undefined) params[i] = options[i]
+      }
+      return method(params, callback)
+    }
+    return d
+  }
+  var de = def(request)
+  de.get = def(request.get)
+  de.post = def(request.post)
+  de.put = def(request.put)
+  de.head = def(request.head)
+  return de
+}
 
 //
 // HTTP method shortcuts
@@ -420,584 +522,14 @@ function b64_enc (data) {
 
     return enc;
 }
-
-},{"./xmlhttprequest":3}],3:[function(require,module,exports){
-
-
-!function(window) {
-  if(typeof exports === 'undefined')
-    throw new Error('Cannot find global "exports" object. Is this really CommonJS?')
-  if(typeof module === 'undefined')
-    throw new Error('Cannot find global "module" object. Is this really CommonJS?')
-  if(!module.exports)
-    throw new Error('Cannot find global "module.exports" object. Is this really CommonJS?')
-
-  // Define globals to simulate a browser environment.
-  window = window || {}
-
-  var document = window.document || {}
-  if(!window.document)
-    window.document = document
-
-  var navigator = window.navigator || {}
-  if(!window.navigator)
-    window.navigator = navigator
-
-  if(!navigator.userAgent)
-    navigator.userAgent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_2) AppleWebKit/534.51.22 (KHTML, like Gecko) Version/5.1.1 Safari/534.51.22';
-
-  // Remember the old values in window. If the inner code changes anything, export that as a module and restore the old window value.
-  var win = {}
-    , key
-
-  for (key in window)
-    if(window.hasOwnProperty(key))
-      win[key] = window[key]
-
-  run_code()
-
-  for (key in window)
-    if(window.hasOwnProperty(key))
-      if(window[key] !== win[key]) {
-        exports[key] = window[key]
-        window[key] = win[key]
-      }
-
-  function run_code() {
-    // Begin browser file: XMLHttpRequest.js
-/**
-* XMLHttpRequest.js Copyright (C) 2011 Sergey Ilinsky (http://www.ilinsky.com)
-*
-* This work is free software; you can redistribute it and/or modify
-* it under the terms of the GNU Lesser General Public License as published by
-* the Free Software Foundation; either version 2.1 of the License, or
-* (at your option) any later version.
-*
-* This work is distributed in the hope that it will be useful,
-* but without any warranty; without even the implied warranty of
-* merchantability or fitness for a particular purpose. See the
-* GNU Lesser General Public License for more details.
-*
-* You should have received a copy of the GNU Lesser General Public License
-* along with this library; if not, write to the Free Software Foundation, Inc.,
-* 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-*/
-
-(function () {
-
-	// Save reference to earlier defined object implementation (if any)
-	var oXMLHttpRequest = window.XMLHttpRequest;
-
-	// Define on browser type
-	var bGecko  = !!window.controllers;
-	var bIE     = !!window.document.namespaces;
-	var bIE7    = bIE && window.navigator.userAgent.match(/MSIE 7.0/);
-
-	// Enables "XMLHttpRequest()" call next to "new XMLHttpRequest()"
-	function fXMLHttpRequest() {
-		this._object  = oXMLHttpRequest && !bIE7 ? new oXMLHttpRequest : new window.ActiveXObject("Microsoft.XMLHTTP");
-		this._listeners = [];
-	}
-
-	// Constructor
-	function cXMLHttpRequest() {
-		return new fXMLHttpRequest;
-	}
-	cXMLHttpRequest.prototype = fXMLHttpRequest.prototype;
-
-	// BUGFIX: Firefox with Firebug installed would break pages if not executed
-	if (bGecko && oXMLHttpRequest.wrapped) {
-		cXMLHttpRequest.wrapped = oXMLHttpRequest.wrapped;
-	}
-
-	// Constants
-	cXMLHttpRequest.UNSENT            = 0;
-	cXMLHttpRequest.OPENED            = 1;
-	cXMLHttpRequest.HEADERS_RECEIVED  = 2;
-	cXMLHttpRequest.LOADING           = 3;
-	cXMLHttpRequest.DONE              = 4;
-
-	// Interface level constants
-	cXMLHttpRequest.prototype.UNSENT            = cXMLHttpRequest.UNSENT;
-	cXMLHttpRequest.prototype.OPENED            = cXMLHttpRequest.OPENED;
-	cXMLHttpRequest.prototype.HEADERS_RECEIVED  = cXMLHttpRequest.HEADERS_RECEIVED;
-	cXMLHttpRequest.prototype.LOADING           = cXMLHttpRequest.LOADING;
-	cXMLHttpRequest.prototype.DONE              = cXMLHttpRequest.DONE;
-
-	// Public Properties
-	cXMLHttpRequest.prototype.readyState    = cXMLHttpRequest.UNSENT;
-	cXMLHttpRequest.prototype.responseText  = '';
-	cXMLHttpRequest.prototype.responseXML   = null;
-	cXMLHttpRequest.prototype.status        = 0;
-	cXMLHttpRequest.prototype.statusText    = '';
-
-	// Priority proposal
-	cXMLHttpRequest.prototype.priority    = "NORMAL";
-
-	// Instance-level Events Handlers
-	cXMLHttpRequest.prototype.onreadystatechange  = null;
-
-	// Class-level Events Handlers
-	cXMLHttpRequest.onreadystatechange  = null;
-	cXMLHttpRequest.onopen              = null;
-	cXMLHttpRequest.onsend              = null;
-	cXMLHttpRequest.onabort             = null;
-
-	// Public Methods
-	cXMLHttpRequest.prototype.open  = function(sMethod, sUrl, bAsync, sUser, sPassword) {
-		// http://www.w3.org/TR/XMLHttpRequest/#the-open-method
-		var sLowerCaseMethod = sMethod.toLowerCase();
-		if (sLowerCaseMethod == "connect" || sLowerCaseMethod == "trace" || sLowerCaseMethod == "track") {
-			// Using a generic error and an int - not too sure all browsers support correctly
-			// http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#securityerror, so, this is safer
-			// XXX should do better than that, but this is OT to XHR.
-			throw new Error(18);
-		}
-
-		// Delete headers, required when object is reused
-		delete this._headers;
-
-		// When bAsync parameter value is omitted, use true as default
-		if (arguments.length < 3) {
-			bAsync  = true;
-		}
-
-		// Save async parameter for fixing Gecko bug with missing readystatechange in synchronous requests
-		this._async   = bAsync;
-
-		// Set the onreadystatechange handler
-		var oRequest  = this;
-		var nState    = this.readyState;
-		var fOnUnload = null;
-
-		// BUGFIX: IE - memory leak on page unload (inter-page leak)
-		if (bIE && bAsync) {
-			fOnUnload = function() {
-				if (nState != cXMLHttpRequest.DONE) {
-					fCleanTransport(oRequest);
-					// Safe to abort here since onreadystatechange handler removed
-					oRequest.abort();
-				}
-			};
-			window.attachEvent("onunload", fOnUnload);
-		}
-
-		// Add method sniffer
-		if (cXMLHttpRequest.onopen) {
-			cXMLHttpRequest.onopen.apply(this, arguments);
-		}
-
-		if (arguments.length > 4) {
-			this._object.open(sMethod, sUrl, bAsync, sUser, sPassword);
-		} else if (arguments.length > 3) {
-			this._object.open(sMethod, sUrl, bAsync, sUser);
-		} else {
-			this._object.open(sMethod, sUrl, bAsync);
-		}
-
-		this.readyState = cXMLHttpRequest.OPENED;
-		fReadyStateChange(this);
-
-		this._object.onreadystatechange = function() {
-			if (bGecko && !bAsync) {
-				return;
-			}
-
-			// Synchronize state
-			oRequest.readyState   = oRequest._object.readyState;
-			fSynchronizeValues(oRequest);
-
-			// BUGFIX: Firefox fires unnecessary DONE when aborting
-			if (oRequest._aborted) {
-				// Reset readyState to UNSENT
-				oRequest.readyState = cXMLHttpRequest.UNSENT;
-
-				// Return now
-				return;
-			}
-
-			if (oRequest.readyState == cXMLHttpRequest.DONE) {
-				// Free up queue
-				delete oRequest._data;
-
-				// Uncomment these lines for bAsync
-				/**
-				 * if (bAsync) {
-				 * 	fQueue_remove(oRequest);
-				 * }
-				 */
-
-				fCleanTransport(oRequest);
-
-				// Uncomment this block if you need a fix for IE cache
-				/**
-				 * // BUGFIX: IE - cache issue
-				 * if (!oRequest._object.getResponseHeader("Date")) {
-				 * 	// Save object to cache
-				 * 	oRequest._cached  = oRequest._object;
-				 *
-				 * 	// Instantiate a new transport object
-				 * 	cXMLHttpRequest.call(oRequest);
-				 *
-				 * 	// Re-send request
-				 * 	if (sUser) {
-				 * 		if (sPassword) {
-				 * 			oRequest._object.open(sMethod, sUrl, bAsync, sUser, sPassword);
-				 * 		} else {
-				 * 			oRequest._object.open(sMethod, sUrl, bAsync);
-				 * 		}
-				 *
-				 * 		oRequest._object.setRequestHeader("If-Modified-Since", oRequest._cached.getResponseHeader("Last-Modified") || new window.Date(0));
-				 * 		// Copy headers set
-				 * 		if (oRequest._headers) {
-				 * 			for (var sHeader in oRequest._headers) {
-				 * 				// Some frameworks prototype objects with functions
-				 * 				if (typeof oRequest._headers[sHeader] == "string") {
-				 * 					oRequest._object.setRequestHeader(sHeader, oRequest._headers[sHeader]);
-				 * 				}
-				 * 			}
-				 * 		}
-				 * 		oRequest._object.onreadystatechange = function() {
-				 * 			// Synchronize state
-				 * 			oRequest.readyState   = oRequest._object.readyState;
-				 *
-				 * 			if (oRequest._aborted) {
-				 * 				//
-				 * 				oRequest.readyState = cXMLHttpRequest.UNSENT;
-				 *
-				 * 				// Return
-				 * 				return;
-				 * 			}
-				 *
-				 * 			if (oRequest.readyState == cXMLHttpRequest.DONE) {
-				 * 				// Clean Object
-				 * 				fCleanTransport(oRequest);
-				 *
-				 * 				// get cached request
-				 * 				if (oRequest.status == 304) {
-				 * 					oRequest._object  = oRequest._cached;
-				 * 				}
-				 *
-				 * 				//
-				 * 				delete oRequest._cached;
-				 *
-				 * 				//
-				 * 				fSynchronizeValues(oRequest);
-				 *
-				 * 				//
-				 * 				fReadyStateChange(oRequest);
-				 *
-				 * 				// BUGFIX: IE - memory leak in interrupted
-				 * 				if (bIE && bAsync) {
-				 * 					window.detachEvent("onunload", fOnUnload);
-				 * 				}
-				 *
-				 * 			}
-				 * 		};
-				 * 		oRequest._object.send(null);
-				 *
-				 * 		// Return now - wait until re-sent request is finished
-				 * 		return;
-				 * 	};
-				 */
-
-				// BUGFIX: IE - memory leak in interrupted
-				if (bIE && bAsync) {
-					window.detachEvent("onunload", fOnUnload);
-				}
-
-				// BUGFIX: Some browsers (Internet Explorer, Gecko) fire OPEN readystate twice
-				if (nState != oRequest.readyState) {
-					fReadyStateChange(oRequest);
-				}
-
-				nState  = oRequest.readyState;
-			}
-		};
-	};
-
-	cXMLHttpRequest.prototype.send = function(vData) {
-		// Add method sniffer
-		if (cXMLHttpRequest.onsend) {
-			cXMLHttpRequest.onsend.apply(this, arguments);
-		}
-
-		if (!arguments.length) {
-			vData = null;
-		}
-
-		// BUGFIX: Safari - fails sending documents created/modified dynamically, so an explicit serialization required
-		// BUGFIX: IE - rewrites any custom mime-type to "text/xml" in case an XMLNode is sent
-		// BUGFIX: Gecko - fails sending Element (this is up to the implementation either to standard)
-		if (vData && vData.nodeType) {
-			vData = window.XMLSerializer ? new window.XMLSerializer().serializeToString(vData) : vData.xml;
-			if (!this._headers["Content-Type"]) {
-				this._object.setRequestHeader("Content-Type", "application/xml");
-			}
-		}
-
-		this._data = vData;
-
-		/**
-		 * // Add to queue
-		 * if (this._async) {
-		 * 	fQueue_add(this);
-		 * } else { */
-		fXMLHttpRequest_send(this);
-		 /**
-		 * }
-		 */
-	};
-
-	cXMLHttpRequest.prototype.abort = function() {
-		// Add method sniffer
-		if (cXMLHttpRequest.onabort) {
-			cXMLHttpRequest.onabort.apply(this, arguments);
-		}
-
-		// BUGFIX: Gecko - unnecessary DONE when aborting
-		if (this.readyState > cXMLHttpRequest.UNSENT) {
-			this._aborted = true;
-		}
-
-		this._object.abort();
-
-		// BUGFIX: IE - memory leak
-		fCleanTransport(this);
-
-		this.readyState = cXMLHttpRequest.UNSENT;
-
-		delete this._data;
-
-		/* if (this._async) {
-	 	* 	fQueue_remove(this);
-	 	* }
-	 	*/
-	};
-
-	cXMLHttpRequest.prototype.getAllResponseHeaders = function() {
-		return this._object.getAllResponseHeaders();
-	};
-
-	cXMLHttpRequest.prototype.getResponseHeader = function(sName) {
-		return this._object.getResponseHeader(sName);
-	};
-
-	cXMLHttpRequest.prototype.setRequestHeader  = function(sName, sValue) {
-		// BUGFIX: IE - cache issue
-		if (!this._headers) {
-			this._headers = {};
-		}
-
-		this._headers[sName]  = sValue;
-
-		return this._object.setRequestHeader(sName, sValue);
-	};
-
-	// EventTarget interface implementation
-	cXMLHttpRequest.prototype.addEventListener  = function(sName, fHandler, bUseCapture) {
-		for (var nIndex = 0, oListener; oListener = this._listeners[nIndex]; nIndex++) {
-			if (oListener[0] == sName && oListener[1] == fHandler && oListener[2] == bUseCapture) {
-				return;
-			}
-		}
-
-		// Add listener
-		this._listeners.push([sName, fHandler, bUseCapture]);
-	};
-
-	cXMLHttpRequest.prototype.removeEventListener = function(sName, fHandler, bUseCapture) {
-		for (var nIndex = 0, oListener; oListener = this._listeners[nIndex]; nIndex++) {
-			if (oListener[0] == sName && oListener[1] == fHandler && oListener[2] == bUseCapture) {
-				break;
-			}
-		}
-
-		// Remove listener
-		if (oListener) {
-			this._listeners.splice(nIndex, 1);
-		}
-	};
-
-	cXMLHttpRequest.prototype.dispatchEvent = function(oEvent) {
-		var oEventPseudo  = {
-			'type':             oEvent.type,
-			'target':           this,
-			'currentTarget':    this,
-			'eventPhase':       2,
-			'bubbles':          oEvent.bubbles,
-			'cancelable':       oEvent.cancelable,
-			'timeStamp':        oEvent.timeStamp,
-			'stopPropagation':  function() {},  // There is no flow
-			'preventDefault':   function() {},  // There is no default action
-			'initEvent':        function() {}   // Original event object should be initialized
-		};
-
-		// Execute onreadystatechange
-		if (oEventPseudo.type == "readystatechange" && this.onreadystatechange) {
-			(this.onreadystatechange.handleEvent || this.onreadystatechange).apply(this, [oEventPseudo]);
-		}
-
-
-		// Execute listeners
-		for (var nIndex = 0, oListener; oListener = this._listeners[nIndex]; nIndex++) {
-			if (oListener[0] == oEventPseudo.type && !oListener[2]) {
-				(oListener[1].handleEvent || oListener[1]).apply(this, [oEventPseudo]);
-			}
-		}
-
-	};
-
-	//
-	cXMLHttpRequest.prototype.toString  = function() {
-		return '[' + "object" + ' ' + "XMLHttpRequest" + ']';
-	};
-
-	cXMLHttpRequest.toString  = function() {
-		return '[' + "XMLHttpRequest" + ']';
-	};
-
-	/**
-	 * // Queue manager
-	 * var oQueuePending = {"CRITICAL":[],"HIGH":[],"NORMAL":[],"LOW":[],"LOWEST":[]},
-	 * aQueueRunning = [];
-	 * function fQueue_add(oRequest) {
-	 * 	oQueuePending[oRequest.priority in oQueuePending ? oRequest.priority : "NORMAL"].push(oRequest);
-	 * 	//
-	 * 	setTimeout(fQueue_process);
-	 * };
-	 *
-	 * function fQueue_remove(oRequest) {
-	 * 	for (var nIndex = 0, bFound = false; nIndex < aQueueRunning.length; nIndex++)
-	 * 	if (bFound) {
-	 * 		aQueueRunning[nIndex - 1] = aQueueRunning[nIndex];
-	 * 	} else {
-	 * 		if (aQueueRunning[nIndex] == oRequest) {
-	 * 			bFound  = true;
-	 * 		}
-	 * }
-	 *
-	 * 	if (bFound) {
-	 * 		aQueueRunning.length--;
-	 * 	}
-	 *
-	 *
-	 * 	//
-	 * 	setTimeout(fQueue_process);
-	 * };
-	 *
-	 * function fQueue_process() {
-	 * if (aQueueRunning.length < 6) {
-	 * for (var sPriority in oQueuePending) {
-	 * if (oQueuePending[sPriority].length) {
-	 * var oRequest  = oQueuePending[sPriority][0];
-	 * oQueuePending[sPriority]  = oQueuePending[sPriority].slice(1);
-	 * //
-	 * aQueueRunning.push(oRequest);
-	 * // Send request
-	 * fXMLHttpRequest_send(oRequest);
-	 * break;
-	 * }
-	 * }
-	 * }
-	 * };
-	 */
-
-	// Helper function
-	function fXMLHttpRequest_send(oRequest) {
-		oRequest._object.send(oRequest._data);
-
-		// BUGFIX: Gecko - missing readystatechange calls in synchronous requests
-		if (bGecko && !oRequest._async) {
-			oRequest.readyState = cXMLHttpRequest.OPENED;
-
-			// Synchronize state
-			fSynchronizeValues(oRequest);
-
-			// Simulate missing states
-			while (oRequest.readyState < cXMLHttpRequest.DONE) {
-				oRequest.readyState++;
-				fReadyStateChange(oRequest);
-				// Check if we are aborted
-				if (oRequest._aborted) {
-					return;
-				}
-			}
-		}
-	}
-
-	function fReadyStateChange(oRequest) {
-		// Sniffing code
-		if (cXMLHttpRequest.onreadystatechange){
-			cXMLHttpRequest.onreadystatechange.apply(oRequest);
-		}
-
-
-		// Fake event
-		oRequest.dispatchEvent({
-			'type':       "readystatechange",
-			'bubbles':    false,
-			'cancelable': false,
-			'timeStamp':  new Date + 0
-		});
-	}
-
-	function fGetDocument(oRequest) {
-		var oDocument = oRequest.responseXML;
-		var sResponse = oRequest.responseText;
-		// Try parsing responseText
-		if (bIE && sResponse && oDocument && !oDocument.documentElement && oRequest.getResponseHeader("Content-Type").match(/[^\/]+\/[^\+]+\+xml/)) {
-			oDocument = new window.ActiveXObject("Microsoft.XMLDOM");
-			oDocument.async       = false;
-			oDocument.validateOnParse = false;
-			oDocument.loadXML(sResponse);
-		}
-
-		// Check if there is no error in document
-		if (oDocument){
-			if ((bIE && oDocument.parseError !== 0) || !oDocument.documentElement || (oDocument.documentElement && oDocument.documentElement.tagName == "parsererror")) {
-				return null;
-			}
-		}
-		return oDocument;
-	}
-
-	function fSynchronizeValues(oRequest) {
-		try { oRequest.responseText = oRequest._object.responseText;  } catch (e) {}
-		try { oRequest.responseXML  = fGetDocument(oRequest._object); } catch (e) {}
-		try { oRequest.status       = oRequest._object.status;        } catch (e) {}
-		try { oRequest.statusText   = oRequest._object.statusText;    } catch (e) {}
-	}
-
-	function fCleanTransport(oRequest) {
-		// BUGFIX: IE - memory leak (on-page leak)
-		oRequest._object.onreadystatechange = new window.Function;
-	}
-
-	// Internet Explorer 5.0 (missing apply)
-	if (!window.Function.prototype.apply) {
-		window.Function.prototype.apply = function(oRequest, oArguments) {
-			if (!oArguments) {
-				oArguments  = [];
-			}
-			oRequest.__func = this;
-			oRequest.__func(oArguments[0], oArguments[1], oArguments[2], oArguments[3], oArguments[4]);
-			delete oRequest.__func;
-		};
-	}
-
-	// Register new object with window
-	window.XMLHttpRequest = cXMLHttpRequest;
-
-})();
-
-    // End browser file: XMLHttpRequest.js
-  }
-}(typeof window !== 'undefined' ? window : {});
+    return request;
+//UMD FOOTER START
+}));
+//UMD FOOTER END
+
+},{}],3:[function(require,module,exports){
 
 },{}],4:[function(require,module,exports){
-
-},{}],5:[function(require,module,exports){
 // http://wiki.commonjs.org/wiki/Unit_Testing/1.0
 //
 // THIS IS NOT TESTED NOR LIKELY TO WORK OUTSIDE V8!
@@ -1358,9 +890,9 @@ var objectKeys = Object.keys || function (obj) {
   return keys;
 };
 
-},{"util/":37}],6:[function(require,module,exports){
-arguments[4][4][0].apply(exports,arguments)
-},{"dup":4}],7:[function(require,module,exports){
+},{"util/":36}],5:[function(require,module,exports){
+arguments[4][3][0].apply(exports,arguments)
+},{"dup":3}],6:[function(require,module,exports){
 (function (global){
 /*!
  * The buffer module from node.js, for the browser.
@@ -2908,7 +2440,7 @@ function blitBuffer (src, dst, offset, length) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"base64-js":8,"ieee754":9,"is-array":10}],8:[function(require,module,exports){
+},{"base64-js":7,"ieee754":8,"is-array":9}],7:[function(require,module,exports){
 var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 ;(function (exports) {
@@ -3034,7 +2566,7 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 	exports.fromByteArray = uint8ToBase64
 }(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
 
-},{}],9:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
   var eLen = nBytes * 8 - mLen - 1
@@ -3120,7 +2652,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],10:[function(require,module,exports){
+},{}],9:[function(require,module,exports){
 
 /**
  * isArray
@@ -3155,7 +2687,7 @@ module.exports = isArray || function (val) {
   return !! val && '[object Array]' == str.call(val);
 };
 
-},{}],11:[function(require,module,exports){
+},{}],10:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -3458,7 +2990,7 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],12:[function(require,module,exports){
+},{}],11:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -3483,7 +3015,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],13:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 /**
  * Determine if an object is Buffer
  *
@@ -3502,12 +3034,12 @@ module.exports = function (obj) {
     ))
 }
 
-},{}],14:[function(require,module,exports){
+},{}],13:[function(require,module,exports){
 module.exports = Array.isArray || function (arr) {
   return Object.prototype.toString.call(arr) == '[object Array]';
 };
 
-},{}],15:[function(require,module,exports){
+},{}],14:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -3600,7 +3132,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],16:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 (function (global){
 /*! https://mths.be/punycode v1.3.2 by @mathias */
 ;(function(root) {
@@ -4134,7 +3666,7 @@ process.umask = function() { return 0; };
 }(this));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],17:[function(require,module,exports){
+},{}],16:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -4220,7 +3752,7 @@ var isArray = Array.isArray || function (xs) {
   return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{}],18:[function(require,module,exports){
+},{}],17:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -4307,16 +3839,16 @@ var objectKeys = Object.keys || function (obj) {
   return res;
 };
 
-},{}],19:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 'use strict';
 
 exports.decode = exports.parse = require('./decode');
 exports.encode = exports.stringify = require('./encode');
 
-},{"./decode":17,"./encode":18}],20:[function(require,module,exports){
+},{"./decode":16,"./encode":17}],19:[function(require,module,exports){
 module.exports = require("./lib/_stream_duplex.js")
 
-},{"./lib/_stream_duplex.js":21}],21:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":20}],20:[function(require,module,exports){
 // a duplex stream is just a stream that is both readable and writable.
 // Since JS doesn't have multiple prototypal inheritance, this class
 // prototypally inherits from Readable, and then parasitically from
@@ -4400,7 +3932,7 @@ function forEach (xs, f) {
   }
 }
 
-},{"./_stream_readable":23,"./_stream_writable":25,"core-util-is":26,"inherits":12,"process-nextick-args":27}],22:[function(require,module,exports){
+},{"./_stream_readable":22,"./_stream_writable":24,"core-util-is":25,"inherits":11,"process-nextick-args":26}],21:[function(require,module,exports){
 // a passthrough stream.
 // basically just the most minimal sort of Transform stream.
 // Every written chunk gets output as-is.
@@ -4429,7 +3961,7 @@ PassThrough.prototype._transform = function(chunk, encoding, cb) {
   cb(null, chunk);
 };
 
-},{"./_stream_transform":24,"core-util-is":26,"inherits":12}],23:[function(require,module,exports){
+},{"./_stream_transform":23,"core-util-is":25,"inherits":11}],22:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -5394,7 +4926,7 @@ function indexOf (xs, x) {
 }
 
 }).call(this,require('_process'))
-},{"./_stream_duplex":21,"_process":15,"buffer":7,"core-util-is":26,"events":11,"inherits":12,"isarray":14,"process-nextick-args":27,"string_decoder/":34,"util":6}],24:[function(require,module,exports){
+},{"./_stream_duplex":20,"_process":14,"buffer":6,"core-util-is":25,"events":10,"inherits":11,"isarray":13,"process-nextick-args":26,"string_decoder/":33,"util":5}],23:[function(require,module,exports){
 // a transform stream is a readable/writable stream where you do
 // something with the data.  Sometimes it's called a "filter",
 // but that's not a great name for it, since that implies a thing where
@@ -5593,7 +5125,7 @@ function done(stream, er) {
   return stream.push(null);
 }
 
-},{"./_stream_duplex":21,"core-util-is":26,"inherits":12}],25:[function(require,module,exports){
+},{"./_stream_duplex":20,"core-util-is":25,"inherits":11}],24:[function(require,module,exports){
 // A bit simpler than readable streams.
 // Implement an async ._write(chunk, cb), and it'll handle all
 // the drain event emission and buffering.
@@ -6122,7 +5654,7 @@ function endWritable(stream, state, cb) {
   state.ended = true;
 }
 
-},{"./_stream_duplex":21,"buffer":7,"core-util-is":26,"events":11,"inherits":12,"process-nextick-args":27,"util-deprecate":28}],26:[function(require,module,exports){
+},{"./_stream_duplex":20,"buffer":6,"core-util-is":25,"events":10,"inherits":11,"process-nextick-args":26,"util-deprecate":27}],25:[function(require,module,exports){
 (function (Buffer){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -6232,7 +5764,7 @@ function objectToString(o) {
   return Object.prototype.toString.call(o);
 }
 }).call(this,{"isBuffer":require("../../../../insert-module-globals/node_modules/is-buffer/index.js")})
-},{"../../../../insert-module-globals/node_modules/is-buffer/index.js":13}],27:[function(require,module,exports){
+},{"../../../../insert-module-globals/node_modules/is-buffer/index.js":12}],26:[function(require,module,exports){
 (function (process){
 'use strict';
 module.exports = nextTick;
@@ -6249,7 +5781,7 @@ function nextTick(fn) {
 }
 
 }).call(this,require('_process'))
-},{"_process":15}],28:[function(require,module,exports){
+},{"_process":14}],27:[function(require,module,exports){
 (function (global){
 
 /**
@@ -6320,10 +5852,10 @@ function config (name) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],29:[function(require,module,exports){
+},{}],28:[function(require,module,exports){
 module.exports = require("./lib/_stream_passthrough.js")
 
-},{"./lib/_stream_passthrough.js":22}],30:[function(require,module,exports){
+},{"./lib/_stream_passthrough.js":21}],29:[function(require,module,exports){
 var Stream = (function (){
   try {
     return require('st' + 'ream'); // hack to fix a circular dependency issue when used with browserify
@@ -6337,13 +5869,13 @@ exports.Duplex = require('./lib/_stream_duplex.js');
 exports.Transform = require('./lib/_stream_transform.js');
 exports.PassThrough = require('./lib/_stream_passthrough.js');
 
-},{"./lib/_stream_duplex.js":21,"./lib/_stream_passthrough.js":22,"./lib/_stream_readable.js":23,"./lib/_stream_transform.js":24,"./lib/_stream_writable.js":25}],31:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":20,"./lib/_stream_passthrough.js":21,"./lib/_stream_readable.js":22,"./lib/_stream_transform.js":23,"./lib/_stream_writable.js":24}],30:[function(require,module,exports){
 module.exports = require("./lib/_stream_transform.js")
 
-},{"./lib/_stream_transform.js":24}],32:[function(require,module,exports){
+},{"./lib/_stream_transform.js":23}],31:[function(require,module,exports){
 module.exports = require("./lib/_stream_writable.js")
 
-},{"./lib/_stream_writable.js":25}],33:[function(require,module,exports){
+},{"./lib/_stream_writable.js":24}],32:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -6472,7 +6004,7 @@ Stream.prototype.pipe = function(dest, options) {
   return dest;
 };
 
-},{"events":11,"inherits":12,"readable-stream/duplex.js":20,"readable-stream/passthrough.js":29,"readable-stream/readable.js":30,"readable-stream/transform.js":31,"readable-stream/writable.js":32}],34:[function(require,module,exports){
+},{"events":10,"inherits":11,"readable-stream/duplex.js":19,"readable-stream/passthrough.js":28,"readable-stream/readable.js":29,"readable-stream/transform.js":30,"readable-stream/writable.js":31}],33:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -6695,7 +6227,7 @@ function base64DetectIncompleteChar(buffer) {
   this.charLength = this.charReceived ? 3 : 0;
 }
 
-},{"buffer":7}],35:[function(require,module,exports){
+},{"buffer":6}],34:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -7404,14 +6936,14 @@ function isNullOrUndefined(arg) {
   return  arg == null;
 }
 
-},{"punycode":16,"querystring":19}],36:[function(require,module,exports){
+},{"punycode":15,"querystring":18}],35:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],37:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -8001,7 +7533,7 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":36,"_process":15,"inherits":12}],38:[function(require,module,exports){
+},{"./support/isBuffer":35,"_process":14,"inherits":11}],37:[function(require,module,exports){
 
 /**
  * This is the web browser implementation of `debug()`.
@@ -8150,7 +7682,7 @@ function load() {
 
 exports.enable(load());
 
-},{"./debug":39}],39:[function(require,module,exports){
+},{"./debug":38}],38:[function(require,module,exports){
 
 /**
  * This is the common logic for both the Node.js and web browser
@@ -8349,7 +7881,7 @@ function coerce(val) {
   return val;
 }
 
-},{"ms":40}],40:[function(require,module,exports){
+},{"ms":39}],39:[function(require,module,exports){
 /**
  * Helpers.
  */
@@ -8462,7 +7994,7 @@ function plural(ms, n, name) {
   return Math.ceil(ms / n) + ' ' + name + 's';
 }
 
-},{}],41:[function(require,module,exports){
+},{}],40:[function(require,module,exports){
 (function (process){
 /*
  * errs.js: Simple error creation and passing utilities.
@@ -8741,7 +8273,7 @@ function mixin(target) {
 }
 
 }).call(this,require('_process'))
-},{"_process":15,"events":11,"util":37}],42:[function(require,module,exports){
+},{"_process":14,"events":10,"util":36}],41:[function(require,module,exports){
 (function (process){
 // The changes_couchdb API
 //
@@ -8780,7 +8312,7 @@ module.exports.Feed = feed.Feed;
 module.exports.Changes = stream.Changes
 
 }).call(this,require('_process'))
-},{"./lib/feed":43,"./lib/stream":45,"_process":15}],43:[function(require,module,exports){
+},{"./lib/feed":42,"./lib/stream":44,"_process":14}],42:[function(require,module,exports){
 (function (process){
 // Core routines for event emitters
 //
@@ -9469,7 +9001,7 @@ function destroy_response(response) {
 }
 
 }).call(this,require('_process'))
-},{"../lib":44,"./stream":45,"_process":15,"events":11,"querystring":19,"request":4,"util":37}],44:[function(require,module,exports){
+},{"../lib":43,"./stream":44,"_process":14,"events":10,"querystring":18,"request":3,"util":36}],43:[function(require,module,exports){
 // Copyright 2011 Jason Smith, Jarrett Cruger and contributors
 //
 //    Licensed under the Apache License, Version 2.0 (the "License");
@@ -9522,7 +9054,7 @@ function noop () {}
 
 exports.log4js = { 'getLogger': getLogger }
 
-},{"debug":46}],45:[function(require,module,exports){
+},{"debug":45}],44:[function(require,module,exports){
 (function (process,Buffer){
 // Changes stream
 //
@@ -9838,7 +9370,7 @@ Changes.prototype.error = function(er) {
 }
 
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"../lib":44,"_process":15,"buffer":7,"request":4,"stream":33,"util":37}],46:[function(require,module,exports){
+},{"../lib":43,"_process":14,"buffer":6,"request":3,"stream":32,"util":36}],45:[function(require,module,exports){
 
 /**
  * This is the web browser implementation of `debug()`.
@@ -10008,9 +9540,9 @@ function localstorage(){
   } catch (e) {}
 }
 
-},{"./debug":47}],47:[function(require,module,exports){
-arguments[4][39][0].apply(exports,arguments)
-},{"dup":39,"ms":48}],48:[function(require,module,exports){
+},{"./debug":46}],46:[function(require,module,exports){
+arguments[4][38][0].apply(exports,arguments)
+},{"dup":38,"ms":47}],47:[function(require,module,exports){
 /**
  * Helpers.
  */
@@ -10137,7 +9669,7 @@ function plural(ms, n, name) {
   return Math.ceil(ms / n) + ' ' + name + 's';
 }
 
-},{}],49:[function(require,module,exports){
+},{}],48:[function(require,module,exports){
 // Licensed under the Apache License, Version 2.0 (the 'License'); you may not
 // use this file except in compliance with the License. You may obtain a copy of
 // the License at
@@ -10167,7 +9699,7 @@ module.exports = function logging(cfg) {
   };
 };
 
-},{"debug":38}],50:[function(require,module,exports){
+},{"debug":37}],49:[function(require,module,exports){
 (function (Buffer,__dirname){
 // Licensed under the Apache License, Version 2.0 (the 'License'); you may not
 // use this file except in compliance with the License. You may obtain a copy of
@@ -10940,7 +10472,7 @@ function urlResolveFix(couchUrl, dbName) {
 }
 
 }).call(this,require("buffer").Buffer,"/node_modules/nano/lib")
-},{"../package":51,"./logger":49,"assert":5,"buffer":7,"errs":41,"follow":42,"querystring":19,"request":4,"underscore":52,"url":35}],51:[function(require,module,exports){
+},{"../package":50,"./logger":48,"assert":4,"buffer":6,"errs":40,"follow":41,"querystring":18,"request":3,"underscore":51,"url":34}],50:[function(require,module,exports){
 module.exports={
   "name": "nano",
   "description": "minimalistic couchdb driver for node.js",
@@ -11036,13 +10568,12 @@ module.exports={
     "tarball": "http://registry.npmjs.org/nano/-/nano-6.1.4.tgz"
   },
   "directories": {},
-  "_resolved": "http://registry.npmjs.org/nano/-/nano-6.1.4.tgz",
-  "readme": "ERROR: No README data found!"
+  "_resolved": "http://registry.npmjs.org/nano/-/nano-6.1.4.tgz"
 }
 
-},{}],52:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 module.exports = require('/Users/chesco/workspace/browser-nano/stub/underscore.js');
-},{"/Users/chesco/workspace/browser-nano/stub/underscore.js":53}],53:[function(require,module,exports){
+},{"/Users/chesco/workspace/browser-nano/stub/underscore.js":52}],52:[function(require,module,exports){
 var _ = module.exports = {
     
     extend: function (obj) {

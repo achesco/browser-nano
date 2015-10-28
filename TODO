@@ -1,4 +1,5 @@
 - maybe cookie auth (not basic auth only)
-- jar and other cfg.* options support
+- check jar and other cfg.* options support
 - tests
-- cors supoort options and short manual
+- cors short manual
+- doc about self-signed certs (need to accept manually first)

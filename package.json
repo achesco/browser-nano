@@ -1,15 +1,37 @@
 {
   "name": "browser-nano",
-  "version": "0.0.1",
+  "version": "6.1.4-alpha",
+  "description": "nano couchdb client built for browser",
+  "author": "Anton Lysenko <achesco@gmail.com>",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/achesco/browser-nano"
+  },
+  "bugs": {
+    "url": "https://github.com/achesco/browser-nano/issues"
+  },
+  "keywords": [
+    "nano",
+    "browser",
+    "couchdb",
+    "client",
+    "api",
+    "driver",
+    "request",
+    "json",
+    "nosql",
+    "database"
+  ],
   "dependencies": {
     "nano": "6.1.4",
-    "browser-request": "0.2.1",
     "errs": "0.3.0",
     "underscore": "1.7.0",
     "debug": "2.0.0",
     "follow": "0.12.1"
   },
   "devDependencies": {
+    "browser-request": "^0.3.3",
     "browserify-swap": "^0.2.2",
     "express": "^4.13.3",
     "minifyify": "^7.1.0"
@@ -20,7 +42,9 @@
     ]
   },
   "browserify-swap": {
-    "@packages": ["underscore"],
+    "@packages": [
+      "underscore"
+    ],
     "dev": {
       ".*node_modules.*underscore.js": "./stub/underscore.js"
     }

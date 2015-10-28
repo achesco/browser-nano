@@ -1,0 +1,28 @@
+{
+  "name": "browser-nano",
+  "version": "6.1.4-alpha",
+  "homepage": "https://github.com/achesco/browser-nano",
+  "authors": [
+    "Anton Lysenko <achesco@gmail.com>"
+  ],
+  "description": "nano couchdb client built for browser",
+  "keywords": [
+    "nano",
+    "browser",
+    "couchdb",
+    "client",
+    "api",
+    "driver",
+    "request",
+    "json",
+    "nosql",
+    "database"
+  ],
+  "ignore": [
+    "node_modules",
+    "bower_components",
+    "stub",
+    "server.js",
+    "TODO"
+  ]
+}
