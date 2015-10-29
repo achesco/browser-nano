@@ -1,5 +1,4 @@
 - maybe cookie auth (not basic auth only)
 - check jar and other cfg.* options support
 - tests
-- cors short manual
-- doc about self-signed certs (need to accept manually first)
+- pass adequate default logger
