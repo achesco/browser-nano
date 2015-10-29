@@ -6,6 +6,8 @@
     "Anton Lysenko <achesco@gmail.com>"
   ],
   "description": "nano couchdb client built for browser",
+  "license": "Apache-2.0",
+  "main": "dist/browser-nano.full.js",
   "keywords": [
     "nano",
     "browser",
@@ -23,6 +25,8 @@
     "bower_components",
     "stub",
     "server.js",
-    "TODO"
+    "TODO",
+    ".gitignore",
+    "lib"
   ]
 }
