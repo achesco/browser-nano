@@ -98,6 +98,6 @@ Is to proxy session endpoint request from a server-side using technique above an
 
 ### Self-Signed SSL Certificate Issue
 
-When using CouchDB through HTTPS protocol with self-signed certificate need to manually accept it first. This could be done by accessing Couch's web admin-console on https-port manually. Otherwise, will get 'Invalid certificate error', 'NET::ERR\_CERT\_INVALID' or something similar, depends on browser.
+When using CouchDB through HTTPS protocol with self-signed certificate need to manually accept it first. This could be done by accessing Couch's web admin-console on https-port manually. Otherwise, will get 'Invalid certificate error', 'net::ERR\_INSECURE\_RESPONSE' or something similar, depends on browser.
 
 [How to enable SSL with CouchDB](https://wiki.apache.org/couchdb/How_to_enable_SSL)
