@@ -1,4 +1,4 @@
-# browser-nano
+# browser-nano 6.1.4-alpha
 
 Browser build of **[nano](https://github.com/dscape/nano)** driver for [CouchDB](http://couchdb.apache.org). Direct nano build with browserify lends `1MB+` file after minification, **broser-nano** offers `125KB` version (`77KB` for light).
 
